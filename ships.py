@@ -7,15 +7,32 @@ bdeck_url = 'https://ftp.nhc.noaa.gov/atcf/btk/bal992024.dat'
 #bdeck_url = 'https://hurricanes.ral.ucar.edu/repository/data/bdecks_open/2024/bal992024.dat'
 
 ships_url = 'https://www.ndbc.noaa.gov/ship_obs.php'
-# URL and parameters
+# Last 12 hours
 params = {'uom': 'M', 'time': '12'}
+
+from datetime import datetime, timedelta
+import sys
+
+# Get the current year
+year = datetime.now().strftime('%Y')
+
+# Check if there are any command-line arguments
+if len(sys.argv) > 1:
+    arg = sys.argv[1].lower()
+
+    # Check if the argument matches the pattern (AL99, AL05, etc.)
+    if len(arg) >= 4 and arg[:2].isalpha() and arg[2:].isdigit():
+        basin = arg[:2]
+        number = arg[2:]
+
+        # Modify the URL
+        bdeck_url = f'https://ftp.nhc.noaa.gov/atcf/btk/b{basin}{number}{year}.dat'
 
 import matplotlib.dates as mdates
 import requests
 from bs4 import BeautifulSoup
 import matplotlib.pyplot as plt
 import numpy as np
-from datetime import datetime, timedelta
 import pandas as pd
 
 #from geopy.interpolate import interpolate
