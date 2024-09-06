@@ -10,6 +10,9 @@ ships_url = 'https://www.ndbc.noaa.gov/ship_obs.php'
 # Last 12 hours
 params = {'uom': 'M', 'time': '12'}
 
+# example to find times nearest buoy
+buoy_coord = [34.703, -72.242]
+
 from datetime import datetime, timedelta
 import sys
 
@@ -37,13 +40,10 @@ import pandas as pd
 
 #from geopy.interpolate import interpolate
 # geopy 2.0
-from geopy.distance import geodesic
+from geographiclib.geodesic import Geodesic
 import os
 
 import requests
-
-# Define the interpolation function
-from geopy.distance import geodesic
 
 def datetime_format(dt):
     return dt.strftime("%m/%d %HZ")
@@ -54,12 +54,10 @@ def interpolate_coordinates(row, next_row, fraction):
     lat2, lon2 = next_row['lat'], next_row['lon']
     point1 = (lat1, lon1)
     point2 = (lat2, lon2)
-    g = geodesic(point1, point2)
-    distance = g.km
-    geod = g.geod
-    azimuth = geod.AZIMUTH
+    g = Geodesic.WGS84.Inverse(lat1, lon1, lat2, lon2)
+    distance = g['s12']
     interpolated_distance = distance * fraction
-    interpolated_line = geod.Direct(lon1=lon1, lat1=lat1, azi1=azimuth, s12=interpolated_distance)
+    interpolated_line = Geodesic.WGS84.Direct(lon1=lon1, lat1=lat1, azi1=g['azi1'], s12=interpolated_distance)
     lat2 = interpolated_line['lat2']
     lon2 = interpolated_line['lon2']
     return pd.Series({'lat': lat2, 'lon': lon2})
@@ -102,7 +100,6 @@ for period in obs_periods:
         lon = float(cols[3]) if cols[3] != 'NaN' else np.nan
         pres = float(cols[9]) if cols[9] != 'NaN' else np.nan
         wspd = float(cols[5]) if cols[5] != 'NaN' else np.nan
-
 
         # invalid
         if wspd > 200:
@@ -153,11 +150,12 @@ for line in lines:
         lon = -lon
     data.append([valid_time, lon, lat])
 
-
 df = pd.DataFrame(data, columns=['valid_time', 'lon', 'lat'])
 
 # Sort the DataFrame by valid_time
 df.sort_values(by='valid_time', inplace=True)
+
+df.reset_index(inplace=True)
 
 # Interpolate the coordinates at each hour
 for i in range(len(df) - 1):
@@ -171,6 +169,27 @@ for i in range(len(df) - 1):
         interpolated_row['valid_time'] = new_datetime
         df = pd.concat([df, pd.DataFrame([interpolated_row])], ignore_index=True)
 
+# Sort the DataFrame by valid_time (needed again after interpolation)
+df.sort_values(by='valid_time', inplace=True)
+
+df.reset_index(inplace=True)
+
+buoy_dists = []
+# buoy example
+for i, row in df.iterrows():
+    g = Geodesic.WGS84.Inverse(buoy_coord[0], buoy_coord[1], row.lat, row.lon)
+    buoy_dists.append((np.round(g['s12'] / 1000, 1), np.round(g['azi1'],1), row['valid_time']))
+
+buoy_dists.sort()
+buoy_df = pd.DataFrame(buoy_dists, columns=['distance_km', 'azimuth', 'valid_time'])
+
+print(f"Closest storm approaches to buoy at {buoy_coord[0], buoy_coord[1]}:")
+print(buoy_df)
+
+print("")
+print('Interpolated best track:')
+print(df)
+
 distances = []
 for i in range(len(data_ships)):
     # Find the row for the valid_time that is closest to the datetime in the data
@@ -178,12 +197,10 @@ for i in range(len(data_ships)):
     center_lat = closest_row['lat'].values[0]
     center_lon = closest_row['lon'].values[0]
     # Calculate the distance based on the center
-    point1 = (center_lat, center_lon)
-    point2 = (data_ships[i, 1], data_ships[i, 2])
-    g = geodesic(point1, point2)
-    distance = g.km
+    g = Geodesic.WGS84.Inverse(center_lat, center_lon, data_ships[i, 1], data_ships[i, 2])
+    distance_km = g['s12'] / 1000
     # Use the distance in your calculations...
-    distances.append(distance)
+    distances.append(distance_km)
 
 distances = np.array(distances)
 
@@ -203,6 +220,8 @@ data_ships_with_distances = np.hstack((data_ships, distances.reshape(-1, 1)))
 # Convert the resulting array to a pandas DataFrame
 df_ships = pd.DataFrame(data_ships_with_distances, columns=['datetime', 'lon', 'lat', 'pressure', 'speed', 'distance'])
 
+print("")
+print("Ships observations")
 print(df_ships)
 
 fig = plt.figure(figsize=(18, 8))
